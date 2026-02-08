@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Initiative - Talsepire</title>
+    <title>Initiative</title>
     
     <!-- Firebase SDK (version compatibilité) -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
@@ -89,9 +89,6 @@
             border-radius: 20px;
             cursor: pointer;
             font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
         }
         
         .dark-mode .theme-toggle {
@@ -333,34 +330,6 @@
             background-color: rgba(255,255,255,0.05);
         }
         
-        .status-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 8px;
-        }
-        
-        .online {
-            background-color: #28a745;
-        }
-        
-        .offline {
-            background-color: #dc3545;
-        }
-        
-        .connection-status {
-            display: flex;
-            align-items: center;
-            font-size: 14px;
-        }
-        
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-        
         @media (max-width: 768px) {
             .lists-container {
                 grid-template-columns: 1fr;
@@ -377,12 +346,6 @@
             .share-controls {
                 flex-direction: column;
             }
-            
-            .header-right {
-                flex-direction: column;
-                gap: 8px;
-                align-items: flex-end;
-            }
         }
     </style>
 </head>
@@ -390,15 +353,9 @@
     <div class="container">
         <header>
             <h1>Initiative</h1>
-            <div class="header-right">
-                <div class="connection-status" id="connectionStatus">
-                    <span class="status-indicator offline" id="statusDot"></span>
-                    <span id="statusText">Hors ligne</span>
-                </div>
-                <button class="theme-toggle" id="themeToggle">
-                    <span id="themeIcon">Mode Sombre</span>
-                </button>
-            </div>
+            <button class="theme-toggle" id="themeToggle">
+                <span id="themeIcon">Mode Sombre</span>
+            </button>
         </header>
         
         <!-- Section Partage Firebase -->
@@ -406,7 +363,6 @@
             <h3>Session partagée</h3>
             <div id="roomInfo" style="display: none;">
                 <p>Session ID: <span class="room-id" id="roomIdDisplay"></span></p>
-                <p>Joueurs en ligne: <span id="playerCount">1</span></p>
                 <div class="share-controls">
                     <input type="text" id="shareUrlInput" readonly style="cursor: pointer;" onclick="this.select()">
                     <button class="btn-secondary" id="copyLinkBtn">Copier le lien</button>
@@ -512,9 +468,6 @@
         const outBagCount = document.getElementById('outBagCount');
         
         // Éléments Firebase
-        const connectionStatus = document.getElementById('connectionStatus');
-        const statusDot = document.getElementById('statusDot');
-        const statusText = document.getElementById('statusText');
         const roomInfo = document.getElementById('roomInfo');
         const joinRoom = document.getElementById('joinRoom');
         const roomIdDisplay = document.getElementById('roomIdDisplay');
@@ -524,7 +477,6 @@
         const roomIdInput = document.getElementById('roomIdInput');
         const createRoomBtn = document.getElementById('createRoomBtn');
         const joinRoomBtn = document.getElementById('joinRoomBtn');
-        const playerCount = document.getElementById('playerCount');
 
         // Initialiser l'utilisateur
         currentUser = generateUserId();
@@ -535,31 +487,6 @@
             document.body.classList.toggle('dark-mode', darkMode);
             themeIcon.textContent = darkMode ? 'Mode Sombre' : 'Mode Clair';
         });
-
-        // Surveiller la connexion Firebase
-        function monitorConnection() {
-            db.collection('test').doc('connection').get()
-                .then(() => {
-                    updateConnectionStatus(true);
-                })
-                .catch(() => {
-                    updateConnectionStatus(false);
-                });
-        }
-
-        function updateConnectionStatus(isConnected) {
-            if (isConnected) {
-                statusDot.className = 'status-indicator online';
-                statusText.textContent = 'En ligne';
-            } else {
-                statusDot.className = 'status-indicator offline';
-                statusText.textContent = 'Hors ligne';
-            }
-        }
-
-        // Vérifier la connexion au démarrage et périodiquement
-        monitorConnection();
-        setInterval(monitorConnection, 10000);
 
         // Gestion des sessions
         createRoomBtn.addEventListener('click', createRoom);
@@ -589,12 +516,6 @@
                 inBag: [],
                 outBag: [],
                 round: 1,
-                players: {
-                    [currentUser]: {
-                        joined: firebase.firestore.FieldValue.serverTimestamp(),
-                        lastActive: firebase.firestore.FieldValue.serverTimestamp()
-                    }
-                },
                 currentDrawnName: "",
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             }).then(() => {
@@ -606,7 +527,6 @@
                 updateDrawnCharacterDisplay();
                 updateUI();
                 startListeningToRoom(roomId);
-                updatePlayerActivity();
             }).catch(error => {
                 console.error("Erreur création session:", error);
                 alert("Erreur lors de la création de la session");
@@ -627,28 +547,14 @@
                     if (doc.exists) {
                         currentRoomId = roomId;
                         showRoomInfo(roomId);
-                        
-                        // Ajouter le joueur à la session
-                        return db.collection('initiative_sessions').doc(roomId).update({
-                            [`players.${currentUser}`]: {
-                                joined: firebase.firestore.FieldValue.serverTimestamp(),
-                                lastActive: firebase.firestore.FieldValue.serverTimestamp()
-                            }
-                        });
+                        startListeningToRoom(roomId);
                     } else {
                         alert("Session non trouvée");
-                        throw new Error("Session non trouvée");
                     }
-                })
-                .then(() => {
-                    startListeningToRoom(roomId);
-                    updatePlayerActivity();
                 })
                 .catch(error => {
-                    if (error.message !== "Session non trouvée") {
-                        console.error("Erreur:", error);
-                        alert("Erreur lors de la connexion");
-                    }
+                    console.error("Erreur:", error);
+                    alert("Erreur lors de la connexion");
                 });
         }
 
@@ -681,12 +587,6 @@
                         // Mettre à jour le nom actuellement tiré
                         currentDrawnName = data.currentDrawnName || "";
                         updateDrawnCharacterDisplay();
-                        
-                        // Compter les joueurs actifs
-                        if (data.players) {
-                            const activePlayers = Object.keys(data.players).length;
-                            playerCount.textContent = activePlayers;
-                        }
                         
                         updateUI();
                     }
@@ -732,19 +632,6 @@
                 drawnCharacter.style.color = '';
             }
         }
-
-        function updatePlayerActivity() {
-            if (!currentRoomId) return;
-            
-            db.collection('initiative_sessions').doc(currentRoomId).update({
-                [`players.${currentUser}.lastActive`]: firebase.firestore.FieldValue.serverTimestamp()
-            }).catch(console.error);
-        }
-
-        // Mettre à jour l'activité du joueur toutes les 30 secondes
-        setInterval(() => {
-            if (currentRoomId) updatePlayerActivity();
-        }, 30000);
 
         // Ajouter un personnage au sac
         addButton.addEventListener('click', addCharacter);
@@ -855,13 +742,6 @@
             if (unsubscribe) {
                 unsubscribe();
                 unsubscribe = null;
-            }
-            
-            if (currentRoomId) {
-                // Retirer le joueur de la session
-                db.collection('initiative_sessions').doc(currentRoomId).update({
-                    [`players.${currentUser}`]: firebase.firestore.FieldValue.delete()
-                }).catch(console.error);
             }
             
             currentRoomId = null;
