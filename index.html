@@ -488,7 +488,7 @@
         let currentRoomId = null;
         let unsubscribe = null;
         let currentUser = null;
-        let lastDrawnName = "";
+        let currentDrawnName = "";
 
         // Générer un ID utilisateur unique
         function generateUserId() {
@@ -528,7 +528,6 @@
 
         // Initialiser l'utilisateur
         currentUser = generateUserId();
-        console.log("Utilisateur:", currentUser);
 
         // Gestion du mode sombre/clair
         themeToggle.addEventListener('click', () => {
@@ -596,14 +595,14 @@
                         lastActive: firebase.firestore.FieldValue.serverTimestamp()
                     }
                 },
-                lastDrawnName: "",
+                currentDrawnName: "",
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             }).then(() => {
                 // Synchroniser les données locales
                 inBag = [];
                 outBag = [];
                 round = 1;
-                lastDrawnName = "";
+                currentDrawnName = "";
                 updateDrawnCharacterDisplay();
                 updateUI();
                 startListeningToRoom(roomId);
@@ -679,8 +678,8 @@
                         outBag = data.outBag || [];
                         round = data.round || 1;
                         
-                        // Mettre à jour le dernier nom tiré
-                        lastDrawnName = data.lastDrawnName || "";
+                        // Mettre à jour le nom actuellement tiré
+                        currentDrawnName = data.currentDrawnName || "";
                         updateDrawnCharacterDisplay();
                         
                         // Compter les joueurs actifs
@@ -709,24 +708,24 @@
             });
         }
 
-        function updateLastDrawnName(characterName) {
+        function updateCurrentDrawnName(characterName) {
             if (!currentRoomId) return;
             
-            // Mettre à jour seulement le nom du dernier personnage tiré
+            // Mettre à jour seulement le nom du personnage actuellement tiré
             db.collection('initiative_sessions').doc(currentRoomId).update({
-                lastDrawnName: characterName
+                currentDrawnName: characterName
             }).then(() => {
                 // Mettre à jour la variable locale
-                lastDrawnName = characterName;
+                currentDrawnName = characterName;
                 updateDrawnCharacterDisplay();
             }).catch(error => {
-                console.error("Erreur mise à jour dernier tirage:", error);
+                console.error("Erreur mise à jour:", error);
             });
         }
 
         function updateDrawnCharacterDisplay() {
-            if (lastDrawnName) {
-                drawnCharacter.textContent = `${lastDrawnName} agit maintenant!`;
+            if (currentDrawnName) {
+                drawnCharacter.textContent = `${currentDrawnName} agit maintenant!`;
                 drawnCharacter.style.color = '#28a745';
             } else {
                 drawnCharacter.textContent = 'Aucun personnage tiré pour le moment';
@@ -793,8 +792,8 @@
             drawn.active = true;
             outBag.push(drawn);
             
-            // Mettre à jour Firestore avec le dernier nom tiré
-            updateLastDrawnName(drawn.name);
+            // Mettre à jour Firestore avec le nom actuellement tiré
+            updateCurrentDrawnName(drawn.name);
             
             updateUI();
             updateFirestore();
@@ -813,13 +812,13 @@
             outBag = [];
             round++;
             
-            // Réinitialiser le dernier tirage
-            lastDrawnName = "";
+            // Réinitialiser le nom actuellement tiré
+            currentDrawnName = "";
             
             // Mettre à jour Firestore
             if (currentRoomId) {
                 db.collection('initiative_sessions').doc(currentRoomId).update({
-                    lastDrawnName: ""
+                    currentDrawnName: ""
                 }).catch(console.error);
             }
             
@@ -834,7 +833,7 @@
                 inBag = [];
                 outBag = [];
                 round = 1;
-                lastDrawnName = "";
+                currentDrawnName = "";
                 updateDrawnCharacterDisplay();
                 updateUI();
                 updateFirestore();
@@ -874,7 +873,7 @@
             inBag = [];
             outBag = [];
             round = 1;
-            lastDrawnName = "";
+            currentDrawnName = "";
             updateDrawnCharacterDisplay();
             updateUI();
             
