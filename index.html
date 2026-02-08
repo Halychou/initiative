@@ -4,6 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Initiative - Talsepire</title>
+    
+    <!-- Firebase SDK (version compatibilité) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    
     <style>
         :root {
             --bg-light: #f5f5f5;
@@ -285,6 +290,77 @@
             color: #4cc9f0;
         }
         
+        /* Styles pour le partage Firebase */
+        .share-section {
+            margin-bottom: 25px;
+            padding: 15px;
+            background-color: rgba(74, 111, 165, 0.05);
+            border-radius: 8px;
+            border: 1px solid var(--border-light);
+        }
+        
+        .dark-mode .share-section {
+            background-color: rgba(15, 52, 96, 0.1);
+            border-color: var(--border-dark);
+        }
+        
+        .share-section h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+        }
+        
+        .share-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .share-controls input {
+            flex: 1;
+            margin: 0;
+        }
+        
+        .room-id {
+            font-family: monospace;
+            background-color: rgba(0,0,0,0.05);
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin-top: 5px;
+            display: inline-block;
+        }
+        
+        .dark-mode .room-id {
+            background-color: rgba(255,255,255,0.05);
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .online {
+            background-color: #28a745;
+        }
+        
+        .offline {
+            background-color: #dc3545;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+        }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
         @media (max-width: 768px) {
             .lists-container {
                 grid-template-columns: 1fr;
@@ -297,6 +373,16 @@
             .action-section {
                 flex-direction: column;
             }
+            
+            .share-controls {
+                flex-direction: column;
+            }
+            
+            .header-right {
+                flex-direction: column;
+                gap: 8px;
+                align-items: flex-end;
+            }
         }
     </style>
 </head>
@@ -304,10 +390,37 @@
     <div class="container">
         <header>
             <h1>Initiative</h1>
-            <button class="theme-toggle" id="themeToggle">
-                <span id="themeIcon">Mode Sombre</span>
-            </button>
+            <div class="header-right">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-indicator offline" id="statusDot"></span>
+                    <span id="statusText">Hors ligne</span>
+                </div>
+                <button class="theme-toggle" id="themeToggle">
+                    <span id="themeIcon">Mode Sombre</span>
+                </button>
+            </div>
         </header>
+        
+        <!-- Section Partage Firebase -->
+        <div class="share-section">
+            <h3>Session partagée</h3>
+            <div id="roomInfo" style="display: none;">
+                <p>Session ID: <span class="room-id" id="roomIdDisplay"></span></p>
+                <p>Joueurs en ligne: <span id="playerCount">1</span></p>
+                <div class="share-controls">
+                    <input type="text" id="shareUrlInput" readonly style="cursor: pointer;" onclick="this.select()">
+                    <button class="btn-secondary" id="copyLinkBtn">Copier le lien</button>
+                    <button class="btn-danger" id="leaveRoomBtn">Quitter</button>
+                </div>
+            </div>
+            <div id="joinRoom" style="display: block;">
+                <div class="share-controls">
+                    <input type="text" id="roomIdInput" placeholder="ID de session (optionnel)">
+                    <button class="btn-primary" id="createRoomBtn">Nouvelle session</button>
+                    <button class="btn-secondary" id="joinRoomBtn">Rejoindre</button>
+                </div>
+            </div>
+        </div>
         
         <div class="round-counter">
             Round: <span id="roundCount">1</span> | Restants dans le sac: <span id="remainingCount">0</span>
@@ -353,12 +466,34 @@
     </div>
 
     <script>
+        // Configuration Firebase avec TES informations
+        const firebaseConfig = {
+            apiKey: "AIzaSyCt2SDLrzrq5k0MO9l-VXS307vhnFwFSUg",
+            authDomain: "initiative-4f9f2.firebaseapp.com",
+            projectId: "initiative-4f9f2",
+            storageBucket: "initiative-4f9f2.firebasestorage.app",
+            messagingSenderId: "671565973452",
+            appId: "1:671565973452:web:a4733b03d922be83b8bf69"
+        };
+
+        // Initialiser Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
         // État de l'application
         let inBag = [];
         let outBag = [];
         let round = 1;
         let darkMode = true;
-        
+        let currentRoomId = null;
+        let unsubscribe = null;
+        let currentUser = null;
+
+        // Générer un ID utilisateur unique
+        function generateUserId() {
+            return 'user_' + Math.random().toString(36).substring(2, 15);
+        }
+
         // Éléments DOM
         const themeToggle = document.getElementById('themeToggle');
         const themeIcon = document.getElementById('themeIcon');
@@ -375,19 +510,216 @@
         const inBagCount = document.getElementById('inBagCount');
         const outBagCount = document.getElementById('outBagCount');
         
+        // Éléments Firebase
+        const connectionStatus = document.getElementById('connectionStatus');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const roomInfo = document.getElementById('roomInfo');
+        const joinRoom = document.getElementById('joinRoom');
+        const roomIdDisplay = document.getElementById('roomIdDisplay');
+        const shareUrlInput = document.getElementById('shareUrlInput');
+        const copyLinkBtn = document.getElementById('copyLinkBtn');
+        const leaveRoomBtn = document.getElementById('leaveRoomBtn');
+        const roomIdInput = document.getElementById('roomIdInput');
+        const createRoomBtn = document.getElementById('createRoomBtn');
+        const joinRoomBtn = document.getElementById('joinRoomBtn');
+        const playerCount = document.getElementById('playerCount');
+
+        // Initialiser l'utilisateur
+        currentUser = generateUserId();
+        console.log("Utilisateur:", currentUser);
+
         // Gestion du mode sombre/clair
         themeToggle.addEventListener('click', () => {
             darkMode = !darkMode;
             document.body.classList.toggle('dark-mode', darkMode);
             themeIcon.textContent = darkMode ? 'Mode Sombre' : 'Mode Clair';
         });
-        
+
+        // Surveiller la connexion Firebase
+        function monitorConnection() {
+            db.collection('test').doc('connection').get()
+                .then(() => {
+                    updateConnectionStatus(true);
+                })
+                .catch(() => {
+                    updateConnectionStatus(false);
+                });
+        }
+
+        function updateConnectionStatus(isConnected) {
+            if (isConnected) {
+                statusDot.className = 'status-indicator online';
+                statusText.textContent = 'En ligne';
+            } else {
+                statusDot.className = 'status-indicator offline';
+                statusText.textContent = 'Hors ligne';
+            }
+        }
+
+        // Vérifier la connexion au démarrage et périodiquement
+        monitorConnection();
+        setInterval(monitorConnection, 10000);
+
+        // Gestion des sessions
+        createRoomBtn.addEventListener('click', createRoom);
+        joinRoomBtn.addEventListener('click', joinExistingRoom);
+        copyLinkBtn.addEventListener('click', copyShareLink);
+        leaveRoomBtn.addEventListener('click', leaveRoom);
+
+        function generateRoomId() {
+            const adjectives = ["brave", "sombre", "mystique", "ancien", "rapide", "fort", "sage", "rusé", "furieux", "calme"];
+            const nouns = ["dragon", "loup", "aigle", "ours", "serpent", "faucon", "corbeau", "tigre", "licorne", "phoenix"];
+            const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+            const noun = nouns[Math.floor(Math.random() * nouns.length)];
+            const num = Math.floor(Math.random() * 90) + 10;
+            return `${adj}-${noun}-${num}`;
+        }
+
+        function createRoom() {
+            const inputRoomId = roomIdInput.value.trim();
+            const roomId = inputRoomId || generateRoomId();
+            
+            currentRoomId = roomId;
+            showRoomInfo(roomId);
+            
+            // Créer la session dans Firestore
+            db.collection('initiative_sessions').doc(roomId).set({
+                created: firebase.firestore.FieldValue.serverTimestamp(),
+                inBag: [],
+                outBag: [],
+                round: 1,
+                players: {
+                    [currentUser]: {
+                        joined: firebase.firestore.FieldValue.serverTimestamp(),
+                        lastActive: firebase.firestore.FieldValue.serverTimestamp()
+                    }
+                },
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            }).then(() => {
+                // Synchroniser les données locales
+                inBag = [];
+                outBag = [];
+                round = 1;
+                updateUI();
+                startListeningToRoom(roomId);
+                updatePlayerActivity();
+            }).catch(error => {
+                console.error("Erreur création session:", error);
+                alert("Erreur lors de la création de la session");
+            });
+        }
+
+        function joinExistingRoom() {
+            const roomId = roomIdInput.value.trim();
+            
+            if (!roomId) {
+                alert("Veuillez entrer un ID de session");
+                return;
+            }
+            
+            // Vérifier si la session existe
+            db.collection('initiative_sessions').doc(roomId).get()
+                .then(doc => {
+                    if (doc.exists) {
+                        currentRoomId = roomId;
+                        showRoomInfo(roomId);
+                        
+                        // Ajouter le joueur à la session
+                        return db.collection('initiative_sessions').doc(roomId).update({
+                            [`players.${currentUser}`]: {
+                                joined: firebase.firestore.FieldValue.serverTimestamp(),
+                                lastActive: firebase.firestore.FieldValue.serverTimestamp()
+                            }
+                        });
+                    } else {
+                        alert("Session non trouvée");
+                        throw new Error("Session non trouvée");
+                    }
+                })
+                .then(() => {
+                    startListeningToRoom(roomId);
+                    updatePlayerActivity();
+                })
+                .catch(error => {
+                    if (error.message !== "Session non trouvée") {
+                        console.error("Erreur:", error);
+                        alert("Erreur lors de la connexion");
+                    }
+                });
+        }
+
+        function showRoomInfo(roomId) {
+            roomIdDisplay.textContent = roomId;
+            const currentUrl = window.location.origin + window.location.pathname;
+            const shareLink = `${currentUrl}?room=${roomId}`;
+            shareUrlInput.value = shareLink;
+            
+            roomInfo.style.display = 'block';
+            joinRoom.style.display = 'none';
+            
+            // Mettre à jour l'URL dans le navigateur
+            window.history.pushState({}, '', shareLink);
+        }
+
+        function startListeningToRoom(roomId) {
+            // Arrêter l'écoute précédente si elle existe
+            if (unsubscribe) unsubscribe();
+            
+            // Écouter les changements en temps réel
+            unsubscribe = db.collection('initiative_sessions').doc(roomId)
+                .onSnapshot(doc => {
+                    if (doc.exists) {
+                        const data = doc.data();
+                        inBag = data.inBag || [];
+                        outBag = data.outBag || [];
+                        round = data.round || 1;
+                        
+                        // Compter les joueurs actifs
+                        if (data.players) {
+                            const activePlayers = Object.keys(data.players).length;
+                            playerCount.textContent = activePlayers;
+                        }
+                        
+                        updateUI();
+                    }
+                }, error => {
+                    console.error("Erreur écoute:", error);
+                });
+        }
+
+        function updateFirestore() {
+            if (!currentRoomId) return;
+            
+            db.collection('initiative_sessions').doc(currentRoomId).update({
+                inBag: inBag,
+                outBag: outBag,
+                round: round,
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            }).catch(error => {
+                console.error("Erreur mise à jour:", error);
+            });
+        }
+
+        function updatePlayerActivity() {
+            if (!currentRoomId) return;
+            
+            db.collection('initiative_sessions').doc(currentRoomId).update({
+                [`players.${currentUser}.lastActive`]: firebase.firestore.FieldValue.serverTimestamp()
+            }).catch(console.error);
+        }
+
+        // Mettre à jour l'activité du joueur toutes les 30 secondes
+        setInterval(() => {
+            if (currentRoomId) updatePlayerActivity();
+        }, 30000);
+
         // Ajouter un personnage au sac
         addButton.addEventListener('click', addCharacter);
         characterInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') addCharacter();
         });
-        
+
         function addCharacter() {
             const name = characterInput.value.trim();
             if (name === '') {
@@ -395,7 +727,6 @@
                 return;
             }
             
-            // Vérifier si le nom existe déjà
             if ([...inBag, ...outBag].some(char => char.name === name)) {
                 alert('Ce nom est déjà utilisé');
                 return;
@@ -409,35 +740,34 @@
             
             characterInput.value = '';
             updateUI();
+            updateFirestore();
         }
-        
+
         // Piger un personnage du sac
         drawButton.addEventListener('click', drawCharacter);
         
         function drawCharacter() {
             if (inBag.length === 0) {
-                drawnCharacter.textContent = "Le sac est vide! Ajoutez des personnages ou commencez un nouveau round.";
+                drawnCharacter.textContent = "Le sac est vide!";
                 drawnCharacter.style.color = '#dc3545';
                 return;
             }
             
-            // Choisir un personnage au hasard
             const randomIndex = Math.floor(Math.random() * inBag.length);
             const drawn = inBag[randomIndex];
             
-            // Retirer du sac et ajouter à la liste "hors du sac"
             inBag.splice(randomIndex, 1);
             drawn.active = true;
             outBag.push(drawn);
             
-            // Mettre à jour l'affichage du personnage tiré
             drawnCharacter.textContent = `${drawn.name} agit maintenant!`;
             drawnCharacter.style.color = '#28a745';
             
             updateUI();
+            updateFirestore();
         }
-        
-        // Recommencer un nouveau round (remettre tous les personnages dans le sac)
+
+        // Recommencer un nouveau round
         resetBagButton.addEventListener('click', resetBag);
         
         function resetBag() {
@@ -446,7 +776,6 @@
                 return;
             }
             
-            // Remettre tous les personnages dans le sac
             inBag = [...inBag, ...outBag.map(char => ({...char, active: false}))];
             outBag = [];
             round++;
@@ -455,8 +784,9 @@
             drawnCharacter.style.color = '#4a6fa5';
             
             updateUI();
+            updateFirestore();
         }
-        
+
         // Tout effacer
         clearAllButton.addEventListener('click', () => {
             if (confirm("Êtes-vous sûr de vouloir tout effacer? Cette action est irréversible.")) {
@@ -466,9 +796,10 @@
                 drawnCharacter.textContent = "Aucun personnage tiré pour le moment";
                 drawnCharacter.style.color = '';
                 updateUI();
+                updateFirestore();
             }
         });
-        
+
         // Supprimer un personnage
         function removeCharacter(id, fromInBag) {
             if (fromInBag) {
@@ -477,8 +808,74 @@
                 outBag = outBag.filter(char => char.id !== id);
             }
             updateUI();
+            updateFirestore();
         }
-        
+
+        function leaveRoom() {
+            if (unsubscribe) {
+                unsubscribe();
+                unsubscribe = null;
+            }
+            
+            if (currentRoomId) {
+                // Retirer le joueur de la session
+                db.collection('initiative_sessions').doc(currentRoomId).update({
+                    [`players.${currentUser}`]: firebase.firestore.FieldValue.delete()
+                }).catch(console.error);
+            }
+            
+            currentRoomId = null;
+            roomInfo.style.display = 'none';
+            joinRoom.style.display = 'block';
+            roomIdInput.value = '';
+            
+            // Réinitialiser les données locales
+            inBag = [];
+            outBag = [];
+            round = 1;
+            updateUI();
+            
+            // Nettoyer l'URL
+            window.history.pushState({}, '', window.location.pathname);
+        }
+
+        function copyShareLink() {
+            shareUrlInput.select();
+            shareUrlInput.setSelectionRange(0, 99999);
+            
+            navigator.clipboard.writeText(shareUrlInput.value)
+                .then(() => {
+                    const originalText = copyLinkBtn.textContent;
+                    copyLinkBtn.textContent = 'Copié!';
+                    setTimeout(() => {
+                        copyLinkBtn.textContent = originalText;
+                    }, 2000);
+                })
+                .catch(err => {
+                    console.error('Erreur copie:', err);
+                    // Fallback pour vieux navigateurs
+                    document.execCommand('copy');
+                    copyLinkBtn.textContent = 'Copié!';
+                    setTimeout(() => {
+                        copyLinkBtn.textContent = 'Copier le lien';
+                    }, 2000);
+                });
+        }
+
+        // Vérifier s'il y a un room ID dans l'URL
+        function checkUrlForRoom() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room');
+            
+            if (roomId) {
+                roomIdInput.value = roomId;
+                // Auto-join après un petit délai
+                setTimeout(() => {
+                    joinExistingRoom();
+                }, 1000);
+            }
+        }
+
         // Mettre à jour l'interface
         function updateUI() {
             // Mettre à jour les listes
@@ -496,7 +893,7 @@
             resetBagButton.disabled = outBag.length === 0 && inBag.length === 0;
             clearAllButton.disabled = outBag.length === 0 && inBag.length === 0;
         }
-        
+
         // Mettre à jour une liste de personnages
         function updateList(listElement, characters, isInBag) {
             listElement.innerHTML = '';
@@ -530,22 +927,26 @@
                 listElement.appendChild(li);
             });
         }
-        
-        // Exemple de données initiales (à supprimer en production)
+
+        // Initialiser
+        checkUrlForRoom();
+
+        // Exemple de données initiales (pour démo)
         function initializeExampleData() {
-            inBag = [
-                {id: 1, name: "Aric le Guerrier", active: false},
-                {id: 2, name: "Liora la Mage", active: false},
-                {id: 3, name: "Goblin 1", active: false},
-                {id: 4, name: "Goblin 2", active: false},
-                {id: 5, name: "Goblin Chef", active: false}
-            ];
-            updateUI();
-            drawnCharacter.textContent = "Ajoutez vos personnages et ennemis pour commencer";
+            if (!currentRoomId && inBag.length === 0) {
+                inBag = [
+                    {id: 1, name: "Aric le Guerrier", active: false},
+                    {id: 2, name: "Liora la Mage", active: false},
+                    {id: 3, name: "Goblin 1", active: false},
+                    {id: 4, name: "Goblin 2", active: false},
+                    {id: 5, name: "Goblin Chef", active: false}
+                ];
+                updateUI();
+            }
         }
-        
-        // Initialiser avec des données d'exemple
-        initializeExampleData();
+
+        // Initialiser avec des données d'exemple si pas de session
+        setTimeout(initializeExampleData, 500);
     </script>
 </body>
 </html>
