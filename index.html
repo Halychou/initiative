@@ -271,6 +271,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            flex-direction: column;
         }
         
         .dark-mode .drawn-character {
@@ -361,6 +362,13 @@
             gap: 15px;
         }
         
+        .last-drawn-info {
+            font-size: 14px;
+            margin-top: 10px;
+            opacity: 0.8;
+            font-style: italic;
+        }
+        
         @media (max-width: 768px) {
             .lists-container {
                 grid-template-columns: 1fr;
@@ -428,6 +436,7 @@
         
         <div class="drawn-character" id="drawnCharacter">
             Aucun personnage tiré pour le moment
+            <div class="last-drawn-info" id="lastDrawnInfo"></div>
         </div>
         
         <h2>Ajouter un participant</h2>
@@ -488,6 +497,9 @@
         let currentRoomId = null;
         let unsubscribe = null;
         let currentUser = null;
+        let lastDrawnName = "";
+        let lastDrawnBy = "";
+        let lastDrawnTime = null;
 
         // Générer un ID utilisateur unique
         function generateUserId() {
@@ -509,6 +521,7 @@
         const remainingCount = document.getElementById('remainingCount');
         const inBagCount = document.getElementById('inBagCount');
         const outBagCount = document.getElementById('outBagCount');
+        const lastDrawnInfo = document.getElementById('lastDrawnInfo');
         
         // Éléments Firebase
         const connectionStatus = document.getElementById('connectionStatus');
@@ -592,8 +605,14 @@
                 players: {
                     [currentUser]: {
                         joined: firebase.firestore.FieldValue.serverTimestamp(),
-                        lastActive: firebase.firestore.FieldValue.serverTimestamp()
+                        lastActive: firebase.firestore.FieldValue.serverTimestamp(),
+                        name: `Joueur_${Math.floor(Math.random() * 1000)}` // Nom aléatoire pour l'affichage
                     }
+                },
+                lastDrawn: {
+                    name: "",
+                    by: "",
+                    time: null
                 },
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             }).then(() => {
@@ -601,6 +620,7 @@
                 inBag = [];
                 outBag = [];
                 round = 1;
+                lastDrawnName = "";
                 updateUI();
                 startListeningToRoom(roomId);
                 updatePlayerActivity();
@@ -625,11 +645,14 @@
                         currentRoomId = roomId;
                         showRoomInfo(roomId);
                         
-                        // Ajouter le joueur à la session
+                        // Ajouter le joueur à la session avec un nom aléatoire
+                        const playerName = `Joueur_${Math.floor(Math.random() * 1000)}`;
+                        
                         return db.collection('initiative_sessions').doc(roomId).update({
                             [`players.${currentUser}`]: {
                                 joined: firebase.firestore.FieldValue.serverTimestamp(),
-                                lastActive: firebase.firestore.FieldValue.serverTimestamp()
+                                lastActive: firebase.firestore.FieldValue.serverTimestamp(),
+                                name: playerName
                             }
                         });
                     } else {
@@ -675,6 +698,15 @@
                         outBag = data.outBag || [];
                         round = data.round || 1;
                         
+                        // Mettre à jour les infos du dernier tirage
+                        if (data.lastDrawn) {
+                            lastDrawnName = data.lastDrawn.name || "";
+                            lastDrawnBy = data.lastDrawn.by || "";
+                            lastDrawnTime = data.lastDrawn.time;
+                            
+                            updateDrawnCharacterDisplay();
+                        }
+                        
                         // Compter les joueurs actifs
                         if (data.players) {
                             const activePlayers = Object.keys(data.players).length;
@@ -699,6 +731,72 @@
             }).catch(error => {
                 console.error("Erreur mise à jour:", error);
             });
+        }
+
+        function updateLastDrawn(characterName) {
+            if (!currentRoomId) return;
+            
+            // Obtenir le nom du joueur courant
+            db.collection('initiative_sessions').doc(currentRoomId).get()
+                .then(doc => {
+                    if (doc.exists) {
+                        const data = doc.data();
+                        const playerData = data.players?.[currentUser] || {};
+                        const playerName = playerData.name || `Joueur ${currentUser.substring(5, 9)}`;
+                        
+                        // Mettre à jour le dernier tirage
+                        return db.collection('initiative_sessions').doc(currentRoomId).update({
+                            lastDrawn: {
+                                name: characterName,
+                                by: playerName,
+                                time: firebase.firestore.FieldValue.serverTimestamp()
+                            }
+                        });
+                    }
+                })
+                .then(() => {
+                    // Mettre à jour les variables locales
+                    lastDrawnName = characterName;
+                    lastDrawnBy = playerName || `Joueur ${currentUser.substring(5, 9)}`;
+                    lastDrawnTime = new Date();
+                    
+                    updateDrawnCharacterDisplay();
+                })
+                .catch(error => {
+                    console.error("Erreur mise à jour dernier tirage:", error);
+                });
+        }
+
+        function updateDrawnCharacterDisplay() {
+            if (lastDrawnName) {
+                drawnCharacter.innerHTML = `
+                    <div>${lastDrawnName} agit maintenant!</div>
+                    <div class="last-drawn-info">
+                        Tiré par ${lastDrawnBy}
+                        ${lastDrawnTime ? ' - ' + formatTimeAgo(lastDrawnTime) : ''}
+                    </div>
+                `;
+                drawnCharacter.style.color = '#28a745';
+            } else {
+                drawnCharacter.innerHTML = 'Aucun personnage tiré pour le moment';
+                drawnCharacter.style.color = '';
+            }
+        }
+
+        function formatTimeAgo(date) {
+            if (!date) return '';
+            
+            const now = new Date();
+            const time = date instanceof Date ? date : date.toDate();
+            const diffMs = now - time;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            
+            if (diffMins < 1) return 'à l\'instant';
+            if (diffMins < 60) return `il y a ${diffMins} minute${diffMins > 1 ? 's' : ''}`;
+            if (diffHours < 24) return `il y a ${diffHours} heure${diffHours > 1 ? 's' : ''}`;
+            
+            return `le ${time.toLocaleDateString()}`;
         }
 
         function updatePlayerActivity() {
@@ -748,7 +846,7 @@
         
         function drawCharacter() {
             if (inBag.length === 0) {
-                drawnCharacter.textContent = "Le sac est vide!";
+                drawnCharacter.innerHTML = 'Le sac est vide!';
                 drawnCharacter.style.color = '#dc3545';
                 return;
             }
@@ -760,8 +858,8 @@
             drawn.active = true;
             outBag.push(drawn);
             
-            drawnCharacter.textContent = `${drawn.name} agit maintenant!`;
-            drawnCharacter.style.color = '#28a745';
+            // Mettre à jour Firestore avec le dernier tirage
+            updateLastDrawn(drawn.name);
             
             updateUI();
             updateFirestore();
@@ -780,8 +878,20 @@
             outBag = [];
             round++;
             
-            drawnCharacter.textContent = `Round ${round} commencé!`;
-            drawnCharacter.style.color = '#4a6fa5';
+            // Réinitialiser le dernier tirage
+            lastDrawnName = "";
+            updateDrawnCharacterDisplay();
+            
+            // Mettre à jour Firestore
+            if (currentRoomId) {
+                db.collection('initiative_sessions').doc(currentRoomId).update({
+                    lastDrawn: {
+                        name: "",
+                        by: "",
+                        time: null
+                    }
+                }).catch(console.error);
+            }
             
             updateUI();
             updateFirestore();
@@ -793,8 +903,8 @@
                 inBag = [];
                 outBag = [];
                 round = 1;
-                drawnCharacter.textContent = "Aucun personnage tiré pour le moment";
-                drawnCharacter.style.color = '';
+                lastDrawnName = "";
+                updateDrawnCharacterDisplay();
                 updateUI();
                 updateFirestore();
             }
@@ -833,6 +943,8 @@
             inBag = [];
             outBag = [];
             round = 1;
+            lastDrawnName = "";
+            updateDrawnCharacterDisplay();
             updateUI();
             
             // Nettoyer l'URL
