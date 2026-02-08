@@ -271,7 +271,6 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            flex-direction: column;
         }
         
         .dark-mode .drawn-character {
@@ -362,13 +361,6 @@
             gap: 15px;
         }
         
-        .last-drawn-info {
-            font-size: 14px;
-            margin-top: 10px;
-            opacity: 0.8;
-            font-style: italic;
-        }
-        
         @media (max-width: 768px) {
             .lists-container {
                 grid-template-columns: 1fr;
@@ -436,7 +428,6 @@
         
         <div class="drawn-character" id="drawnCharacter">
             Aucun personnage tiré pour le moment
-            <div class="last-drawn-info" id="lastDrawnInfo"></div>
         </div>
         
         <h2>Ajouter un participant</h2>
@@ -498,8 +489,6 @@
         let unsubscribe = null;
         let currentUser = null;
         let lastDrawnName = "";
-        let lastDrawnBy = "";
-        let lastDrawnTime = null;
 
         // Générer un ID utilisateur unique
         function generateUserId() {
@@ -521,7 +510,6 @@
         const remainingCount = document.getElementById('remainingCount');
         const inBagCount = document.getElementById('inBagCount');
         const outBagCount = document.getElementById('outBagCount');
-        const lastDrawnInfo = document.getElementById('lastDrawnInfo');
         
         // Éléments Firebase
         const connectionStatus = document.getElementById('connectionStatus');
@@ -605,15 +593,10 @@
                 players: {
                     [currentUser]: {
                         joined: firebase.firestore.FieldValue.serverTimestamp(),
-                        lastActive: firebase.firestore.FieldValue.serverTimestamp(),
-                        name: `Joueur_${Math.floor(Math.random() * 1000)}` // Nom aléatoire pour l'affichage
+                        lastActive: firebase.firestore.FieldValue.serverTimestamp()
                     }
                 },
-                lastDrawn: {
-                    name: "",
-                    by: "",
-                    time: null
-                },
+                lastDrawnName: "",
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             }).then(() => {
                 // Synchroniser les données locales
@@ -621,6 +604,7 @@
                 outBag = [];
                 round = 1;
                 lastDrawnName = "";
+                updateDrawnCharacterDisplay();
                 updateUI();
                 startListeningToRoom(roomId);
                 updatePlayerActivity();
@@ -645,14 +629,11 @@
                         currentRoomId = roomId;
                         showRoomInfo(roomId);
                         
-                        // Ajouter le joueur à la session avec un nom aléatoire
-                        const playerName = `Joueur_${Math.floor(Math.random() * 1000)}`;
-                        
+                        // Ajouter le joueur à la session
                         return db.collection('initiative_sessions').doc(roomId).update({
                             [`players.${currentUser}`]: {
                                 joined: firebase.firestore.FieldValue.serverTimestamp(),
-                                lastActive: firebase.firestore.FieldValue.serverTimestamp(),
-                                name: playerName
+                                lastActive: firebase.firestore.FieldValue.serverTimestamp()
                             }
                         });
                     } else {
@@ -698,14 +679,9 @@
                         outBag = data.outBag || [];
                         round = data.round || 1;
                         
-                        // Mettre à jour les infos du dernier tirage
-                        if (data.lastDrawn) {
-                            lastDrawnName = data.lastDrawn.name || "";
-                            lastDrawnBy = data.lastDrawn.by || "";
-                            lastDrawnTime = data.lastDrawn.time;
-                            
-                            updateDrawnCharacterDisplay();
-                        }
+                        // Mettre à jour le dernier nom tiré
+                        lastDrawnName = data.lastDrawnName || "";
+                        updateDrawnCharacterDisplay();
                         
                         // Compter les joueurs actifs
                         if (data.players) {
@@ -733,70 +709,29 @@
             });
         }
 
-        function updateLastDrawn(characterName) {
+        function updateLastDrawnName(characterName) {
             if (!currentRoomId) return;
             
-            // Obtenir le nom du joueur courant
-            db.collection('initiative_sessions').doc(currentRoomId).get()
-                .then(doc => {
-                    if (doc.exists) {
-                        const data = doc.data();
-                        const playerData = data.players?.[currentUser] || {};
-                        const playerName = playerData.name || `Joueur ${currentUser.substring(5, 9)}`;
-                        
-                        // Mettre à jour le dernier tirage
-                        return db.collection('initiative_sessions').doc(currentRoomId).update({
-                            lastDrawn: {
-                                name: characterName,
-                                by: playerName,
-                                time: firebase.firestore.FieldValue.serverTimestamp()
-                            }
-                        });
-                    }
-                })
-                .then(() => {
-                    // Mettre à jour les variables locales
-                    lastDrawnName = characterName;
-                    lastDrawnBy = playerName || `Joueur ${currentUser.substring(5, 9)}`;
-                    lastDrawnTime = new Date();
-                    
-                    updateDrawnCharacterDisplay();
-                })
-                .catch(error => {
-                    console.error("Erreur mise à jour dernier tirage:", error);
-                });
+            // Mettre à jour seulement le nom du dernier personnage tiré
+            db.collection('initiative_sessions').doc(currentRoomId).update({
+                lastDrawnName: characterName
+            }).then(() => {
+                // Mettre à jour la variable locale
+                lastDrawnName = characterName;
+                updateDrawnCharacterDisplay();
+            }).catch(error => {
+                console.error("Erreur mise à jour dernier tirage:", error);
+            });
         }
 
         function updateDrawnCharacterDisplay() {
             if (lastDrawnName) {
-                drawnCharacter.innerHTML = `
-                    <div>${lastDrawnName} agit maintenant!</div>
-                    <div class="last-drawn-info">
-                        Tiré par ${lastDrawnBy}
-                        ${lastDrawnTime ? ' - ' + formatTimeAgo(lastDrawnTime) : ''}
-                    </div>
-                `;
+                drawnCharacter.textContent = `${lastDrawnName} agit maintenant!`;
                 drawnCharacter.style.color = '#28a745';
             } else {
-                drawnCharacter.innerHTML = 'Aucun personnage tiré pour le moment';
+                drawnCharacter.textContent = 'Aucun personnage tiré pour le moment';
                 drawnCharacter.style.color = '';
             }
-        }
-
-        function formatTimeAgo(date) {
-            if (!date) return '';
-            
-            const now = new Date();
-            const time = date instanceof Date ? date : date.toDate();
-            const diffMs = now - time;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-            
-            if (diffMins < 1) return 'à l\'instant';
-            if (diffMins < 60) return `il y a ${diffMins} minute${diffMins > 1 ? 's' : ''}`;
-            if (diffHours < 24) return `il y a ${diffHours} heure${diffHours > 1 ? 's' : ''}`;
-            
-            return `le ${time.toLocaleDateString()}`;
         }
 
         function updatePlayerActivity() {
@@ -846,7 +781,7 @@
         
         function drawCharacter() {
             if (inBag.length === 0) {
-                drawnCharacter.innerHTML = 'Le sac est vide!';
+                drawnCharacter.textContent = 'Le sac est vide!';
                 drawnCharacter.style.color = '#dc3545';
                 return;
             }
@@ -858,8 +793,8 @@
             drawn.active = true;
             outBag.push(drawn);
             
-            // Mettre à jour Firestore avec le dernier tirage
-            updateLastDrawn(drawn.name);
+            // Mettre à jour Firestore avec le dernier nom tiré
+            updateLastDrawnName(drawn.name);
             
             updateUI();
             updateFirestore();
@@ -880,19 +815,15 @@
             
             // Réinitialiser le dernier tirage
             lastDrawnName = "";
-            updateDrawnCharacterDisplay();
             
             // Mettre à jour Firestore
             if (currentRoomId) {
                 db.collection('initiative_sessions').doc(currentRoomId).update({
-                    lastDrawn: {
-                        name: "",
-                        by: "",
-                        time: null
-                    }
+                    lastDrawnName: ""
                 }).catch(console.error);
             }
             
+            updateDrawnCharacterDisplay();
             updateUI();
             updateFirestore();
         }
